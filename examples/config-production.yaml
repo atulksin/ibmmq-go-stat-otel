@@ -1,0 +1,33 @@
+# Production Configuration for IBM MQ Statistics Collector
+
+mq:
+  queue_manager: "PROD_QM"
+  channel: "PROD.COLLECTOR.SVRCONN"
+  connection_name: "mq.company.com(1414)"
+  user: "collector"
+  # Password should be set via IBMMQ_PASSWORD environment variable
+
+  # SSL Configuration for production
+  key_repository: "/etc/ssl/mq/key"
+  cipher_spec: "TLS_RSA_WITH_AES_256_CBC_SHA256"
+
+collector:
+  stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
+  reset_stats: false
+  interval: "30s" # More frequent collection for production
+  max_cycles: 0
+  continuous: true # Always run in continuous mode
+
+prometheus:
+  port: 9090
+  path: "/metrics"
+  namespace: "ibmmq"
+  subsystem: "prod" # Distinguish production metrics
+  enable_otel: true
+
+logging:
+  level: "info"
+  format: "json" # Structured logging for production
+  output_file: "/var/log/ibmmq-collector/collector.log"
+  verbose: false

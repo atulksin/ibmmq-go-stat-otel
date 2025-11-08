@@ -1,0 +1,100 @@
+# IBM MQ Connection Configuration
+mq:
+  # Queue Manager name
+  queue_manager: "MQQM1"
+
+  # Connection details
+  host: "127.0.0.1"
+  port: 5200
+  channel: "SYSTEM.DEF.SVRCONN"
+
+  # Authentication (leave empty for no authentication)
+  username: ""
+  password: ""
+
+  # SSL/TLS Configuration (optional)
+  ssl:
+    enabled: false
+    key_repository: ""
+    cipher_suite: ""
+
+  # Connection timeout
+  timeout: "30s"
+
+# Collection Configuration
+collector:
+  # Collection interval (0 or empty = one-time collection)
+  interval: "0s"
+
+  # Queue names to collect from
+  statistics_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
+
+  # Collection timeout per queue
+  timeout: "10s"
+
+  # Maximum messages to process per collection cycle
+  max_messages: 1000
+
+  # Whether to reset statistics after reading (requires additional permissions)
+  reset_statistics: false
+
+# Prometheus Metrics Configuration
+metrics:
+  # Enable metrics server
+  enabled: true
+
+  # HTTP server address and port
+  address: "0.0.0.0:9090"
+
+  # Metrics endpoint path
+  path: "/metrics"
+
+  # Metrics namespace (prefix for all metrics)
+  namespace: "ibmmq"
+
+  # Optional subsystem name
+  subsystem: ""
+
+# OpenTelemetry Configuration
+otel:
+  # Enable OpenTelemetry tracing
+  enabled: true
+
+  # Service identification
+  service_name: "ibmmq-collector"
+  service_version: "1.0.0"
+
+  # Optional OTLP exporter configuration
+  otlp:
+    endpoint: ""
+    headers: {}
+
+  # Sampling configuration
+  sampling:
+    ratio: 1.0
+
+# Logging Configuration
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: "info"
+
+  # Log format: json, text
+  format: "json"
+
+  # Output destination: stdout, stderr, or file path
+  output: "stdout"
+
+  # Enable verbose logging for debugging
+  verbose: false
+
+# Health Check Configuration
+health:
+  # Enable health check endpoints
+  enabled: true
+
+  # Health check timeout
+  timeout: "5s"
+
+  # Health check interval for continuous monitoring
+  interval: "10s"

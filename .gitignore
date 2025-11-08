@@ -24,9 +24,47 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Environment and configuration files
 .env
+*.env
+*.local
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Build and deployment
+/dist/
+/build/
+/bin/
+/target/
+
+# Docker
+.dockerignore
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+/logs/
+/tmp/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IBM MQ specific
+sample-runs/*.mqsc
+sample-runs/pcf-data/
+*.pcf
+
+# Test and development artifacts
+/coverage/
+/benchmarks/
+*.pprof
+
+# Runtime and cache
+*.pid
+cache/
+.cache/
