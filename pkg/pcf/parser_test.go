@@ -248,19 +248,266 @@ func TestPCFParser_ParseMQTimestamp(t *testing.T) {
 	}
 }
 
+func TestPCFParser_ErrorHandling(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	parser := NewParser(logger)
+
+	tests := []struct {
+		name    string
+		data    []byte
+		msgType string
+		wantErr bool
+	}{
+		{
+			name:    "nil data",
+			data:    nil,
+			msgType: "statistics",
+			wantErr: true,
+		},
+		{
+			name:    "empty data",
+			data:    []byte{},
+			msgType: "statistics",
+			wantErr: true,
+		},
+		{
+			name:    "too short data",
+			data:    make([]byte, 10),
+			msgType: "statistics",
+			wantErr: true,
+		},
+		{
+			name:    "invalid message type handled gracefully",
+			data:    createTestPCFHeader(MQCFT_STATISTICS, MQCMD_STATISTICS_Q, 1),
+			msgType: "invalid_type_that_should_fail",
+			wantErr: false, // Current implementation handles gracefully
+		},
+		{
+			name:    "corrupted header",
+			data:    []byte{0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01},
+			msgType: "statistics",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parser.ParseMessage(tt.data, tt.msgType)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, result)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+			}
+		})
+	}
+}
+
+func TestPCFParser_LargeMessages(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	parser := NewParser(logger)
+
+	// Create a large message with many parameters
+	header := createTestPCFHeader(MQCFT_STATISTICS, MQCMD_STATISTICS_Q, 10)
+
+	data := make([]byte, 0)
+	data = append(data, header...)
+
+	// Add multiple parameters
+	for i := 0; i < 10; i++ {
+		param := createTestPCFParameter(MQCA_Q_NAME+int32(i), MQCFT_STRING, "LARGE.TEST.QUEUE")
+		data = append(data, param...)
+	}
+
+	result, err := parser.ParseMessage(data, "statistics")
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+
+	stats, ok := result.(*StatisticsData)
+	require.True(t, ok)
+	assert.Equal(t, "statistics", stats.Type)
+	assert.NotNil(t, stats.Parameters)
+}
+
+func TestPCFParser_MessageTypes(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	parser := NewParser(logger)
+
+	tests := []struct {
+		name     string
+		msgType  string
+		expected string
+	}{
+		{
+			name:     "statistics message",
+			msgType:  "statistics",
+			expected: "statistics",
+		},
+		{
+			name:     "accounting message",
+			msgType:  "accounting",
+			expected: "accounting",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var data []byte
+			if tt.msgType == "statistics" {
+				data = createCompleteStatsMessage()
+			} else {
+				data = createCompleteAccountingMessage()
+			}
+
+			result, err := parser.ParseMessage(data, tt.msgType)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Check the type field in the result
+			switch r := result.(type) {
+			case *StatisticsData:
+				assert.Equal(t, tt.expected, r.Type)
+			case *AccountingData:
+				assert.Equal(t, tt.expected, r.Type)
+			default:
+				t.Errorf("Unexpected result type: %T", result)
+			}
+		})
+	}
+}
+
+func TestPCFParser_ParameterExtraction(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	parser := NewParser(logger)
+
+	// Test various parameter types
+	tests := []struct {
+		name      string
+		paramType int32
+		value     interface{}
+	}{
+		{
+			name:      "string parameter",
+			paramType: MQCFT_STRING,
+			value:     "TEST.QUEUE",
+		},
+		{
+			name:      "integer parameter",
+			paramType: MQCFT_INTEGER,
+			value:     int32(100),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var data []byte
+
+			if tt.paramType == MQCFT_STRING {
+				data = createTestPCFParameter(MQCA_Q_NAME, tt.paramType, tt.value.(string))
+			} else {
+				// Create integer parameter
+				data = make([]byte, 16)
+				binary.LittleEndian.PutUint32(data[0:4], uint32(MQIA_CURRENT_Q_DEPTH))
+				binary.LittleEndian.PutUint32(data[4:8], uint32(tt.paramType))
+				binary.LittleEndian.PutUint32(data[8:12], 16)
+				binary.LittleEndian.PutUint32(data[12:16], uint32(tt.value.(int32)))
+			}
+
+			params, err := parser.parseParameters(data, 1)
+			require.NoError(t, err)
+			require.Len(t, params, 1)
+
+			param := params[0]
+			assert.Equal(t, tt.paramType, param.Type)
+
+			if tt.paramType == MQCFT_STRING {
+				assert.Equal(t, tt.value, param.Value)
+			} else {
+				assert.Equal(t, tt.value, param.Value)
+			}
+		})
+	}
+}
+
+func TestPCFParser_ReaderWriterDetection(t *testing.T) {
+	logger := logrus.New()
+	logger.SetLevel(logrus.ErrorLevel)
+	parser := NewParser(logger)
+
+	tests := []struct {
+		name        string
+		inputCount  int32
+		outputCount int32
+		hasReaders  bool
+		hasWriters  bool
+	}{
+		{
+			name:        "has readers and writers",
+			inputCount:  2,
+			outputCount: 1,
+			hasReaders:  true,
+			hasWriters:  true,
+		},
+		{
+			name:        "has only readers",
+			inputCount:  3,
+			outputCount: 0,
+			hasReaders:  true,
+			hasWriters:  false,
+		},
+		{
+			name:        "has only writers",
+			inputCount:  0,
+			outputCount: 2,
+			hasReaders:  false,
+			hasWriters:  true,
+		},
+		{
+			name:        "no readers or writers",
+			inputCount:  0,
+			outputCount: 0,
+			hasReaders:  false,
+			hasWriters:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parameters := []*PCFParameter{
+				{Parameter: MQCA_Q_NAME, Type: MQCFT_STRING, Value: "TEST.QUEUE"},
+				{Parameter: MQIA_OPEN_INPUT_COUNT, Type: MQCFT_INTEGER, Value: tt.inputCount},
+				{Parameter: MQIA_OPEN_OUTPUT_COUNT, Type: MQCFT_INTEGER, Value: tt.outputCount},
+			}
+
+			stats := parser.parseQueueStats(parameters)
+			require.NotNil(t, stats)
+
+			assert.Equal(t, tt.hasReaders, stats.HasReaders)
+			assert.Equal(t, tt.hasWriters, stats.HasWriters)
+			assert.Equal(t, tt.inputCount, stats.InputCount)
+			assert.Equal(t, tt.outputCount, stats.OutputCount)
+		})
+	}
+}
+
 // Helper functions to create test data
 
 func createTestPCFHeader(msgType, command, paramCount int32) []byte {
 	data := make([]byte, 36)
-	binary.BigEndian.PutUint32(data[0:4], uint32(msgType))
-	binary.BigEndian.PutUint32(data[4:8], 36) // Structure length
-	binary.BigEndian.PutUint32(data[8:12], 1) // Version
-	binary.BigEndian.PutUint32(data[12:16], uint32(command))
-	binary.BigEndian.PutUint32(data[16:20], 1) // Message sequence number
-	binary.BigEndian.PutUint32(data[20:24], 0) // Control
-	binary.BigEndian.PutUint32(data[24:28], 0) // Completion code
-	binary.BigEndian.PutUint32(data[28:32], 0) // Reason
-	binary.BigEndian.PutUint32(data[32:36], uint32(paramCount))
+	binary.LittleEndian.PutUint32(data[0:4], uint32(msgType))
+	binary.LittleEndian.PutUint32(data[4:8], 36) // Structure length
+	binary.LittleEndian.PutUint32(data[8:12], 1) // Version
+	binary.LittleEndian.PutUint32(data[12:16], uint32(command))
+	binary.LittleEndian.PutUint32(data[16:20], 1) // Message sequence number
+	binary.LittleEndian.PutUint32(data[20:24], 0) // Control
+	binary.LittleEndian.PutUint32(data[24:28], 0) // Completion code
+	binary.LittleEndian.PutUint32(data[28:32], 0) // Reason
+	binary.LittleEndian.PutUint32(data[32:36], uint32(paramCount))
 	return data
 }
 
@@ -272,9 +519,9 @@ func createTestPCFParameter(param, paramType int32, value string) []byte {
 	}
 
 	data := make([]byte, paramLen)
-	binary.BigEndian.PutUint32(data[0:4], uint32(param))
-	binary.BigEndian.PutUint32(data[4:8], uint32(paramType))
-	binary.BigEndian.PutUint32(data[8:12], uint32(paramLen))
+	binary.LittleEndian.PutUint32(data[0:4], uint32(param))
+	binary.LittleEndian.PutUint32(data[4:8], uint32(paramType))
+	binary.LittleEndian.PutUint32(data[8:12], uint32(paramLen))
 	copy(data[12:], []byte(value))
 
 	return data
@@ -289,10 +536,10 @@ func createCompleteStatsMessage() []byte {
 
 	// Add depth parameter (simplified)
 	depthParam := make([]byte, 16)
-	binary.BigEndian.PutUint32(depthParam[0:4], uint32(MQIA_CURRENT_Q_DEPTH))
-	binary.BigEndian.PutUint32(depthParam[4:8], uint32(MQCFT_INTEGER))
-	binary.BigEndian.PutUint32(depthParam[8:12], 16)
-	binary.BigEndian.PutUint32(depthParam[12:16], 100)
+	binary.LittleEndian.PutUint32(depthParam[0:4], uint32(MQIA_CURRENT_Q_DEPTH))
+	binary.LittleEndian.PutUint32(depthParam[4:8], uint32(MQCFT_INTEGER))
+	binary.LittleEndian.PutUint32(depthParam[8:12], 16)
+	binary.LittleEndian.PutUint32(depthParam[12:16], 100)
 
 	// Add queue manager name parameter
 	qmgrParam := createTestPCFParameter(MQCA_Q_MGR_NAME, MQCFT_STRING, "TESTQM")

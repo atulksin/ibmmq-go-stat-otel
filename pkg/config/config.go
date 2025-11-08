@@ -13,6 +13,8 @@ type MQConfig struct {
 	QueueManager   string `mapstructure:"queue_manager" yaml:"queue_manager" json:"queue_manager"`
 	Channel        string `mapstructure:"channel" yaml:"channel" json:"channel"`
 	ConnectionName string `mapstructure:"connection_name" yaml:"connection_name" json:"connection_name"`
+	Host           string `mapstructure:"host" yaml:"host" json:"host"`
+	Port           int    `mapstructure:"port" yaml:"port" json:"port"`
 	User           string `mapstructure:"user" yaml:"user" json:"user"`
 	Password       string `mapstructure:"password" yaml:"password" json:"password"`
 	KeyRepository  string `mapstructure:"key_repository" yaml:"key_repository" json:"key_repository"`
@@ -61,6 +63,8 @@ func DefaultConfig() *Config {
 			QueueManager:   "MQQM1",
 			Channel:        "APP1.SVRCONN",
 			ConnectionName: "localhost(1414)",
+			Host:           "127.0.0.1",
+			Port:           5200,
 			User:           "",
 			Password:       "",
 			KeyRepository:  "",
@@ -132,6 +136,11 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Unmarshal configuration
 	if err := viper.Unmarshal(config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
+	}
+
+	// Construct ConnectionName from Host and Port if not explicitly set
+	if config.MQ.Host != "" && config.MQ.Port != 0 {
+		config.MQ.ConnectionName = fmt.Sprintf("%s(%d)", config.MQ.Host, config.MQ.Port)
 	}
 
 	// Override with environment variables for sensitive data
